@@ -178,8 +178,10 @@ export class TradeExecutor {
   }
   
   calculateCopySize(originalSize: number): number {
-    const { positionSizeMultiplier, maxTradeSize, minTradeSize, orderType } = config.trading;
-    let size = originalSize * positionSizeMultiplier;
+    const { positionSizeMode, positionSizeMultiplier, fixedPositionSize, maxTradeSize, minTradeSize, orderType } = config.trading;
+    let size = positionSizeMode === 'fixed'
+      ? fixedPositionSize
+      : originalSize * positionSizeMultiplier;
     size = Math.min(size, maxTradeSize);
     const marketMin = orderType === 'FOK' || orderType === 'FAK' ? 1 : minTradeSize;
     size = Math.max(size, marketMin);

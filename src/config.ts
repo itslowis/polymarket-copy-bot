@@ -25,7 +25,9 @@ export const config = {
   },
 
   trading: {
+    positionSizeMode: (process.env.POSITION_SIZE_MODE || 'multiplier') as 'multiplier' | 'fixed',
     positionSizeMultiplier: parseFloat(process.env.POSITION_MULTIPLIER || '0.1'),
+    fixedPositionSize: parseFloat(process.env.FIXED_POSITION_SIZE || '5'),
     maxTradeSize: parseFloat(process.env.MAX_TRADE_SIZE || '100'),
     minTradeSize: parseFloat(process.env.MIN_TRADE_SIZE || '1'),
     slippageTolerance: parseFloat(process.env.SLIPPAGE_TOLERANCE || '0.02'),

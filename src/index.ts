@@ -34,7 +34,11 @@ class PolymarketCopyBot {
     console.log('🤖 Polymarket Copy Trading Bot');
     console.log('================================');
     console.log(`Target wallet: ${config.targetWallet}`);
-    console.log(`Position multiplier: ${config.trading.positionSizeMultiplier * 100}%`);
+    if (config.trading.positionSizeMode === 'fixed') {
+      console.log(`Position size: ${config.trading.fixedPositionSize} USDC (fixed)`);
+    } else {
+      console.log(`Position size: ${config.trading.positionSizeMultiplier * 100}% of original (multiplier)`);
+    }
     console.log(`Max trade size: ${config.trading.maxTradeSize} USDC`);
     console.log(`Order type: ${config.trading.orderType}`);
     console.log(`WebSocket: ${config.monitoring.useWebSocket ? 'Enabled' : 'Disabled'}`);
