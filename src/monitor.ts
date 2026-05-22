@@ -26,7 +26,7 @@ export class TradeMonitor {
   
   private async fetchTradesFromDataApi(): Promise<Trade[]> {
     try {
-      const startSeconds = Math.floor(this.lastProcessedTimestamp / 1000) + 1;
+      const startSeconds = Math.floor(this.lastProcessedTimestamp / 1000);
       const response = await axios.get(
         'https://data-api.polymarket.com/activity',
         {
@@ -41,6 +41,7 @@ export class TradeMonitor {
           headers: {
             'Accept': 'application/json',
           },
+          timeout: 5000,
         }
       );
 

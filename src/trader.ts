@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { ClobClient, Side, OrderType } from '@polymarket/clob-client';
+import { ClobClient, Side, OrderType, AssetType } from '@polymarket/clob-client';
 import { config } from './config.js';
 import type { Trade } from './monitor.js';
 
@@ -9,6 +9,16 @@ interface MarketMetadata {
   negRisk: boolean;
   feeRateBps: number;
   conditionId?: string;
+  timestamp: number;
+}
+
+interface BalanceData {
+  balance: ethers.BigNumber;
+  allowanceCtf: ethers.BigNumber;
+  allowanceEx: ethers.BigNumber;
+  clobBalance: number;
+  clobAllowance: string;
+  ctfApproved: boolean;
   timestamp: number;
 }
 
@@ -35,6 +45,9 @@ export class TradeExecutor {
   private apiCreds?: { apiKey: string; secret: string; passphrase: string };
   private marketCache: Map<string, MarketMetadata> = new Map();
   private readonly CACHE_TTL = 3600000;
+  private usdcDecimals?: number;
+  private balanceCache: Map<string, BalanceData> = new Map();
+  private readonly BALANCE_CACHE_TTL = 5000;
   private readonly RETRY_CONFIG: RetryConfig = {
     maxAttempts: 3,
     initialDelay: 1000,
@@ -418,6 +431,7 @@ export class TradeExecutor {
     );
 
     if (response.success) {
+      this.invalidateBalanceCache();
       console.log(`✅ Limit order placed: ${response.orderID}`);
       return {
         orderId: response.orderID,
@@ -471,6 +485,7 @@ export class TradeExecutor {
     );
 
     if (response.success) {
+      this.invalidateBalanceCache();
       console.log(`✅ ${orderType} order executed: ${response.orderID}`);
       if (response.status === 'LIVE') {
         console.log(`   ⚠️  Order posted to book (no immediate match)`);
@@ -490,59 +505,98 @@ export class TradeExecutor {
     }
   }
 
+  private invalidateBalanceCache(): void {
+    this.balanceCache.clear();
+  }
+
   private async validateBalance(requiredAmount: number, tokenId: string): Promise<void> {
-    try {
-      const metadata = await this.getMarketMetadata(tokenId);
-      const exchangeAddress = metadata.negRisk ? config.contracts.negRiskExchange : config.contracts.exchange;
+    const metadata = await this.getMarketMetadata(tokenId);
+    const exchangeAddress = metadata.negRisk ? config.contracts.negRiskExchange : config.contracts.exchange;
 
-      const usdc = new ethers.Contract(config.contracts.usdc, this.ERC20_ABI, this.wallet);
-      const ctf = new ethers.Contract(config.contracts.ctf, this.CTF_ABI, this.wallet);
-      const decimals = await usdc.decimals();
-      const required = ethers.utils.parseUnits(requiredAmount.toString(), decimals);
+    const usdc = new ethers.Contract(config.contracts.usdc, this.ERC20_ABI, this.wallet);
+    const ctf = new ethers.Contract(config.contracts.ctf, this.CTF_ABI, this.wallet);
 
-      const balance = await usdc.balanceOf(this.wallet.address);
-      if (balance.lt(required)) {
-        const bal = ethers.utils.formatUnits(balance, decimals);
-        throw new Error(`not enough balance / allowance (USDC.e balance ${bal} < required ${requiredAmount})`);
-      }
-
-      const allowanceCtf = await usdc.allowance(this.wallet.address, config.contracts.ctf);
-      if (allowanceCtf.lt(required)) {
-        const allow = ethers.utils.formatUnits(allowanceCtf, decimals);
-        throw new Error(`not enough balance / allowance (USDC.e allowance to CTF ${allow} < required ${requiredAmount})`);
-      }
-
-      const allowanceEx = await usdc.allowance(this.wallet.address, exchangeAddress);
-      if (allowanceEx.lt(required)) {
-        const allow = ethers.utils.formatUnits(allowanceEx, decimals);
-        throw new Error(`not enough balance / allowance (USDC.e allowance to Exchange ${allow} < required ${requiredAmount})`);
-      }
-
-      const clobBal = await this.clobClient.getBalanceAllowance({ asset_type: 'COLLATERAL' });
-      const clobBalance = parseFloat(clobBal?.balance || '0') / 1_000_000;
-      if (clobBalance < requiredAmount) {
-        throw new Error(`not enough balance / allowance (CLOB balance ${clobBalance} < required ${requiredAmount})`);
-      }
-      const clobAllowance = clobBal?.allowances?.[exchangeAddress] || '0';
-      if (clobAllowance === '0') {
-        throw new Error(`not enough balance / allowance (CLOB allowance to Exchange is 0)`);
-      }
-
-      const approved = await ctf.isApprovedForAll(this.wallet.address, exchangeAddress);
-      if (!approved) {
-        console.log('   ⚠️  CTF approval missing for exchange (required for SELLs)');
-      }
-
-      console.log(`   Balance/allowance check passed`);
-    } catch (error) {
-      throw error;
+    // decimals never change — cache permanently
+    if (this.usdcDecimals === undefined) {
+      this.usdcDecimals = await usdc.decimals();
     }
+    const decimals = this.usdcDecimals;
+    const required = ethers.utils.parseUnits(requiredAmount.toString(), decimals);
+
+    // use cached balance data if still fresh
+    const now = Date.now();
+    const cached = this.balanceCache.get(exchangeAddress);
+    let balData: BalanceData;
+
+    if (cached && (now - cached.timestamp) < this.BALANCE_CACHE_TTL) {
+      balData = cached;
+    } else {
+      // all 5 RPC/API calls in parallel
+      const [balance, allowanceCtf, allowanceEx, clobBal, ctfApproved] = await Promise.all([
+        usdc.balanceOf(this.wallet.address),
+        usdc.allowance(this.wallet.address, config.contracts.ctf),
+        usdc.allowance(this.wallet.address, exchangeAddress),
+        this.clobClient.getBalanceAllowance({ asset_type: AssetType.COLLATERAL }),
+        ctf.isApprovedForAll(this.wallet.address, exchangeAddress),
+      ]);
+      balData = {
+        balance,
+        allowanceCtf,
+        allowanceEx,
+        clobBalance: parseFloat((clobBal as any)?.balance || '0') / 1_000_000,
+        clobAllowance: (clobBal as any)?.allowances?.[exchangeAddress] || '0',
+        ctfApproved,
+        timestamp: now,
+      };
+      this.balanceCache.set(exchangeAddress, balData);
+    }
+
+    if (balData.balance.lt(required)) {
+      const bal = ethers.utils.formatUnits(balData.balance, decimals);
+      throw new Error(`not enough balance / allowance (USDC.e balance ${bal} < required ${requiredAmount})`);
+    }
+    if (balData.allowanceCtf.lt(required)) {
+      const allow = ethers.utils.formatUnits(balData.allowanceCtf, decimals);
+      throw new Error(`not enough balance / allowance (USDC.e allowance to CTF ${allow} < required ${requiredAmount})`);
+    }
+    if (balData.allowanceEx.lt(required)) {
+      const allow = ethers.utils.formatUnits(balData.allowanceEx, decimals);
+      throw new Error(`not enough balance / allowance (USDC.e allowance to Exchange ${allow} < required ${requiredAmount})`);
+    }
+    if (balData.clobBalance < requiredAmount) {
+      throw new Error(`not enough balance / allowance (CLOB balance ${balData.clobBalance} < required ${requiredAmount})`);
+    }
+    if (balData.clobAllowance === '0') {
+      throw new Error(`not enough balance / allowance (CLOB allowance to Exchange is 0)`);
+    }
+    if (!balData.ctfApproved) {
+      console.log('   ⚠️  CTF approval missing for exchange (required for SELLs)');
+    }
+
+    console.log(`   Balance/allowance check passed`);
   }
   
   
   async getPositions(): Promise<any[]> {
     try {
-      return await this.clobClient.getPositions();
+      const trades = await this.clobClient.getTrades({ maker_address: this.wallet.address });
+      if (!trades || trades.length === 0) return [];
+
+      // Aggregate fills into net positions per asset
+      const posMap = new Map<string, { asset_id: string; condition_id: string; shares: number; notional: number }>();
+      for (const t of trades) {
+        const size = parseFloat(t.size);
+        const price = parseFloat(t.price);
+        const sign = (t.side as string) === 'BUY' ? 1 : -1;
+        const existing = posMap.get(t.asset_id) ?? { asset_id: t.asset_id, condition_id: t.market, shares: 0, notional: 0 };
+        existing.shares += size * sign;
+        existing.notional += size * price * sign;
+        posMap.set(t.asset_id, existing);
+      }
+
+      return Array.from(posMap.values())
+        .filter(p => p.shares > 0.0001)
+        .map(p => ({ asset_id: p.asset_id, condition_id: p.condition_id, size: p.shares, notional: Math.max(0, p.notional) }));
     } catch {
       return [];
     }

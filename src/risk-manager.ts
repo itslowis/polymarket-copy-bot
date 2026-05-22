@@ -44,6 +44,10 @@ export class RiskManager {
     return { allowed: true };
   }
 
+  initializeSessionNotional(notional: number): void {
+    this.sessionNotional = notional;
+  }
+
   recordFill(params: {
     trade: Trade;
     notional: number;

@@ -39,7 +39,7 @@ export const config = {
   },
 
   monitoring: {
-    pollInterval: parseInt(process.env.POLL_INTERVAL || '2000'),
+    pollInterval: parseInt(process.env.POLL_INTERVAL || '500'),
     useWebSocket,
     useUserChannel: process.env.USE_USER_CHANNEL === 'true',
     wsAssetIds: parseCsv(process.env.WS_ASSET_IDS),

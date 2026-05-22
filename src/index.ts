@@ -8,7 +8,7 @@ import { RiskManager } from './risk-manager.js';
 
 class PolymarketCopyBot {
   private monitor: TradeMonitor;
-  private wsMonitor?: WebSocketMonitor;
+  private wsMonitor: WebSocketMonitor | undefined;
   private executor: TradeExecutor;
   private positions: PositionTracker;
   private risk: RiskManager;
@@ -175,6 +175,7 @@ class PolymarketCopyBot {
 
       const { loaded, skipped } = this.positions.loadFromClobPositions(positions);
       const totalNotional = this.positions.getTotalNotional();
+      this.risk.initializeSessionNotional(totalNotional);
       console.log(`🧾 Positions loaded: ${loaded} (skipped ${skipped}), total notional ≈ ${totalNotional.toFixed(2)} USDC`);
     } catch (error: any) {
       console.log(`🧾 Positions reconciliation failed: ${error.message || 'Unknown error'}`);
