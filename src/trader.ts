@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { ClobClient, Side, OrderType, AssetType } from '@polymarket/clob-client';
+import { ClobClient, Side, OrderType, AssetType, Chain } from '@polymarket/clob-client-v2';
 import { config } from './config.js';
 import type { Trade } from './monitor.js';
 
@@ -72,15 +72,11 @@ export class TradeExecutor {
     this.provider = new ethers.providers.JsonRpcProvider(config.rpcUrl);
     this.wallet = new ethers.Wallet(config.privateKey, this.provider);
 
-    this.clobClient = new ClobClient(
-      'https://clob.polymarket.com',
-      137,
-      this.wallet,
-      undefined,
-      undefined,
-      undefined,
-      config.polymarketGeoToken || undefined
-    );
+    this.clobClient = new ClobClient({
+      host: 'https://clob.polymarket.com',
+      chain: Chain.POLYGON,
+      signer: this.wallet,
+    });
   }
   
   async initialize(): Promise<void> {
@@ -130,7 +126,8 @@ export class TradeExecutor {
       creds = await this.clobClient.createApiKey();
     }
 
-    const apiKey = (creds as any)?.apiKey || (creds as any)?.key;
+    // v2 returns ApiKeyCreds with field `key` (not `apiKey`)
+    const apiKey = (creds as any)?.key || (creds as any)?.apiKey;
     if (this.isApiError(creds) || !apiKey || !creds?.secret || !creds?.passphrase) {
       const errMsg = this.getApiErrorMessage(creds);
       throw new Error(`Could not create/derive API key: ${errMsg}`);
@@ -146,19 +143,17 @@ export class TradeExecutor {
       passphrase: creds.passphrase,
     };
 
-    this.clobClient = new ClobClient(
-      'https://clob.polymarket.com',
-      137,
-      this.wallet,
-      {
+    this.clobClient = new ClobClient({
+      host: 'https://clob.polymarket.com',
+      chain: Chain.POLYGON,
+      signer: this.wallet,
+      creds: {
         key: apiKey,
         secret: creds.secret,
         passphrase: creds.passphrase,
       },
-      0,
       funderAddress,
-      config.polymarketGeoToken || undefined
-    );
+    });
   }
 
   getWsAuth(): { apiKey: string; secret: string; passphrase: string } | undefined {
@@ -426,7 +421,6 @@ export class TradeExecutor {
         price: validatedPrice,
         size: copyShares,
         side: originalTrade.side as Side,
-        feeRateBps: 0,
       },
       orderOpts,
       OrderType.GTC
@@ -477,9 +471,7 @@ export class TradeExecutor {
       {
         tokenID: originalTrade.tokenId,
         amount: originalTrade.side === 'BUY' ? copyNotional : copyShares,
-        price: validatedPrice,
         side: originalTrade.side as Side,
-        feeRateBps: 0,
         orderType: orderTypeEnum,
       },
       orderOpts,
@@ -641,8 +633,10 @@ export class TradeExecutor {
 
     const usdcSpenders = [
       { name: 'CTF', address: config.contracts.ctf },
-      { name: 'CTF Exchange', address: config.contracts.exchange },
-      { name: 'Neg Risk CTF Exchange', address: config.contracts.negRiskExchange },
+      { name: 'Exchange (v2)', address: config.contracts.exchange },
+      { name: 'Exchange (v1)', address: config.contracts.exchangeV1 },
+      { name: 'Neg Risk Exchange (v2)', address: config.contracts.negRiskExchange },
+      { name: 'Neg Risk Exchange (v1)', address: config.contracts.negRiskExchangeV1 },
     ];
 
     for (const spender of usdcSpenders) {
@@ -659,8 +653,10 @@ export class TradeExecutor {
     }
 
     const operators = [
-      { name: 'CTF Exchange', address: config.contracts.exchange },
-      { name: 'Neg Risk CTF Exchange', address: config.contracts.negRiskExchange },
+      { name: 'Exchange (v2)', address: config.contracts.exchange },
+      { name: 'Exchange (v1)', address: config.contracts.exchangeV1 },
+      { name: 'Neg Risk Exchange (v2)', address: config.contracts.negRiskExchange },
+      { name: 'Neg Risk Exchange (v1)', address: config.contracts.negRiskExchangeV1 },
     ];
 
     for (const operator of operators) {

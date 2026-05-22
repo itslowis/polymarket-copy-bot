@@ -17,11 +17,16 @@ export const config = {
 
   // Polygon mainnet contracts used for approvals and balance checks.
   contracts: {
+    // v2 exchange contracts (primary routing targets for clob-client-v2)
     exchange: '0xE111180000d2663C0091e4f400237545B87B996B',
-    ctf: '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045',
-    usdc: '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB', // pUSD proxy
-    negRiskAdapter: '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296',
     negRiskExchange: '0xe2222d279d744050d28e00520010520000310F59',
+    // v1 exchange contracts (legacy routing; clob-client-v2 may still use these)
+    exchangeV1: '0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E',
+    negRiskExchangeV1: '0xC5d563A36AE78145C45a50134d48A1215220f80a',
+    // token contracts
+    ctf: '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045',
+    usdc: '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB',
+    negRiskAdapter: '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296',
   },
 
   trading: {
