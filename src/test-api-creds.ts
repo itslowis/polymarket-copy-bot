@@ -1,5 +1,7 @@
 import dotenv from 'dotenv';
-import { Wallet } from 'ethers';
+import { createWalletClient, http } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { polygon } from 'viem/chains';
 import { ClobClient, Chain } from '@polymarket/clob-client-v2';
 
 dotenv.config();
@@ -19,13 +21,15 @@ async function main(): Promise<void> {
     throw new Error('Missing POLYMARKET_USER_API_KEY / POLYMARKET_USER_SECRET / POLYMARKET_USER_PASSPHRASE in .env');
   }
 
-  const signer = new Wallet(privateKey);
+  const account = privateKeyToAccount(privateKey as `0x${string}`);
+  const signer = createWalletClient({ account, chain: polygon, transport: http() });
+
   const client = new ClobClient({
     host: HOST,
     chain: Chain.POLYGON,
     signer,
     creds: { key: apiKey, secret, passphrase },
-    funderAddress: signer.address,
+    funderAddress: account.address,
   });
 
   const result: any = await client.getApiKeys();

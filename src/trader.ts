@@ -1,4 +1,7 @@
 import { ethers } from 'ethers';
+import { createWalletClient, http } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { polygon } from 'viem/chains';
 import { ClobClient, Side, OrderType, AssetType, Chain } from '@polymarket/clob-client-v2';
 import { config } from './config.js';
 import type { Trade } from './monitor.js';
@@ -13,9 +16,9 @@ interface MarketMetadata {
 }
 
 interface BalanceData {
-  balance: ethers.BigNumber;
-  allowanceCtf: ethers.BigNumber;
-  allowanceEx: ethers.BigNumber;
+  balance: bigint;
+  allowanceCtf: bigint;
+  allowanceEx: bigint;
   clobBalance: number;
   clobAllowance: string;
   ctfApproved: boolean;
@@ -40,7 +43,8 @@ export interface CopyExecutionResult {
 
 export class TradeExecutor {
   private wallet: ethers.Wallet;
-  private provider: ethers.providers.JsonRpcProvider;
+  private provider: ethers.JsonRpcProvider;
+  private viemWallet: ReturnType<typeof createWalletClient>;
   private clobClient: ClobClient;
   private apiCreds?: { apiKey: string; secret: string; passphrase: string };
   private marketCache: Map<string, MarketMetadata> = new Map();
@@ -69,13 +73,16 @@ export class TradeExecutor {
   private readonly MIN_MAX_FEE_GWEI = parseFloat(process.env.MIN_MAX_FEE_GWEI || '60');
 
   constructor() {
-    this.provider = new ethers.providers.JsonRpcProvider(config.rpcUrl);
+    this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
     this.wallet = new ethers.Wallet(config.privateKey, this.provider);
+
+    const account = privateKeyToAccount(config.privateKey as `0x${string}`);
+    this.viemWallet = createWalletClient({ account, chain: polygon, transport: http(config.rpcUrl) });
 
     this.clobClient = new ClobClient({
       host: 'https://clob.polymarket.com',
       chain: Chain.POLYGON,
-      signer: this.wallet,
+      signer: this.viemWallet,
     });
   }
   
@@ -146,7 +153,7 @@ export class TradeExecutor {
     this.clobClient = new ClobClient({
       host: 'https://clob.polymarket.com',
       chain: Chain.POLYGON,
-      signer: this.wallet,
+      signer: this.viemWallet,
       creds: {
         key: apiKey,
         secret: creds.secret,
@@ -512,10 +519,10 @@ export class TradeExecutor {
 
     // decimals never change — cache permanently
     if (this.usdcDecimals === undefined) {
-      this.usdcDecimals = await usdc.decimals();
+      this.usdcDecimals = Number(await usdc.decimals!());
     }
     const decimals = this.usdcDecimals;
-    const required = ethers.utils.parseUnits(requiredAmount.toString(), decimals);
+    const required = ethers.parseUnits(requiredAmount.toString(), decimals);
 
     // use cached balance data if still fresh
     const now = Date.now();
@@ -527,11 +534,11 @@ export class TradeExecutor {
     } else {
       // all 5 RPC/API calls in parallel
       const [balance, allowanceCtf, allowanceEx, clobBal, ctfApproved] = await Promise.all([
-        usdc.balanceOf(this.wallet.address),
-        usdc.allowance(this.wallet.address, config.contracts.ctf),
-        usdc.allowance(this.wallet.address, exchangeAddress),
+        usdc.balanceOf!(this.wallet.address),
+        usdc.allowance!(this.wallet.address, config.contracts.ctf),
+        usdc.allowance!(this.wallet.address, exchangeAddress),
         this.clobClient.getBalanceAllowance({ asset_type: AssetType.COLLATERAL }),
-        ctf.isApprovedForAll(this.wallet.address, exchangeAddress),
+        ctf.isApprovedForAll!(this.wallet.address, exchangeAddress),
       ]);
       balData = {
         balance,
@@ -545,16 +552,16 @@ export class TradeExecutor {
       this.balanceCache.set(exchangeAddress, balData);
     }
 
-    if (balData.balance.lt(required)) {
-      const bal = ethers.utils.formatUnits(balData.balance, decimals);
+    if (balData.balance < required) {
+      const bal = ethers.formatUnits(balData.balance, decimals);
       throw new Error(`not enough balance / allowance (USDC.e balance ${bal} < required ${requiredAmount})`);
     }
-    if (balData.allowanceCtf.lt(required)) {
-      const allow = ethers.utils.formatUnits(balData.allowanceCtf, decimals);
+    if (balData.allowanceCtf < required) {
+      const allow = ethers.formatUnits(balData.allowanceCtf, decimals);
       throw new Error(`not enough balance / allowance (USDC.e allowance to CTF ${allow} < required ${requiredAmount})`);
     }
-    if (balData.allowanceEx.lt(required)) {
-      const allow = ethers.utils.formatUnits(balData.allowanceEx, decimals);
+    if (balData.allowanceEx < required) {
+      const allow = ethers.formatUnits(balData.allowanceEx, decimals);
       throw new Error(`not enough balance / allowance (USDC.e allowance to Exchange ${allow} < required ${requiredAmount})`);
     }
     if (balData.clobBalance < requiredAmount) {
@@ -622,13 +629,13 @@ export class TradeExecutor {
     const ctf = new ethers.Contract(config.contracts.ctf, this.CTF_ABI, this.wallet);
 
     const maticBal = await this.provider.getBalance(this.wallet.address);
-    const maticAmount = parseFloat(ethers.utils.formatEther(maticBal));
+    const maticAmount = parseFloat(ethers.formatEther(maticBal));
     if (maticAmount < 0.05) {
       console.log(`   ⚠️  Low POL/MATIC for gas: ${maticAmount.toFixed(4)}`);
     }
 
-    const decimals = await usdc.decimals();
-    const minAllowance = ethers.utils.parseUnits(config.trading.maxTradeSize.toString(), decimals);
+    const decimals = Number(await usdc.decimals!());
+    const minAllowance = ethers.parseUnits(config.trading.maxTradeSize.toString(), decimals);
     const gasOverrides = await this.getGasOverrides();
 
     const usdcSpenders = [
@@ -640,10 +647,10 @@ export class TradeExecutor {
     ];
 
     for (const spender of usdcSpenders) {
-      const allowance = await usdc.allowance(this.wallet.address, spender.address);
-      if (allowance.lt(minAllowance)) {
+      const allowance: bigint = await usdc.allowance!(this.wallet.address, spender.address);
+      if (allowance < minAllowance) {
         console.log(`   Approving USDC.e to ${spender.name} (${spender.address})...`);
-        const tx = await usdc.approve(spender.address, ethers.constants.MaxUint256, gasOverrides);
+        const tx = await usdc.approve!(spender.address, ethers.MaxUint256, gasOverrides);
         console.log(`   Tx: ${tx.hash}`);
         await tx.wait();
         console.log(`   ✅ USDC.e approved to ${spender.name}`);
@@ -660,10 +667,10 @@ export class TradeExecutor {
     ];
 
     for (const operator of operators) {
-      const approved = await ctf.isApprovedForAll(this.wallet.address, operator.address);
+      const approved = await ctf.isApprovedForAll!(this.wallet.address, operator.address);
       if (!approved) {
         console.log(`   Approving CTF for ${operator.name} (${operator.address})...`);
-        const tx = await ctf.setApprovalForAll(operator.address, true, gasOverrides);
+        const tx = await ctf.setApprovalForAll!(operator.address, true, gasOverrides);
         console.log(`   Tx: ${tx.hash}`);
         await tx.wait();
         console.log(`   ✅ CTF approved for ${operator.name}`);
@@ -673,26 +680,24 @@ export class TradeExecutor {
     }
   }
 
-  private async getGasOverrides(): Promise<ethers.providers.TransactionRequest> {
+  private async getGasOverrides(): Promise<ethers.TransactionRequest> {
     const feeData = await this.provider.getFeeData();
-    const minPriority = ethers.utils.parseUnits(this.MIN_PRIORITY_FEE_GWEI.toString(), 'gwei');
-    const minMaxFee = ethers.utils.parseUnits(this.MIN_MAX_FEE_GWEI.toString(), 'gwei');
+    const minPriority = ethers.parseUnits(this.MIN_PRIORITY_FEE_GWEI.toString(), 'gwei');
+    const minMaxFee = ethers.parseUnits(this.MIN_MAX_FEE_GWEI.toString(), 'gwei');
 
-    let maxPriority = feeData.maxPriorityFeePerGas || feeData.gasPrice || minPriority;
-    let maxFee = feeData.maxFeePerGas || feeData.gasPrice || minMaxFee;
+    let maxPriority = feeData.maxPriorityFeePerGas ?? feeData.gasPrice ?? minPriority;
+    let maxFee = feeData.maxFeePerGas ?? feeData.gasPrice ?? minMaxFee;
 
     const latestBlock = await this.provider.getBlock('latest');
     const baseFee = latestBlock?.baseFeePerGas;
     if (baseFee) {
-      const targetMaxFee = baseFee.mul(2).add(maxPriority);
-      if (maxFee.lt(targetMaxFee)) {
-        maxFee = targetMaxFee;
-      }
+      const targetMaxFee = baseFee * 2n + maxPriority;
+      if (maxFee < targetMaxFee) maxFee = targetMaxFee;
     }
 
-    if (maxPriority.lt(minPriority)) maxPriority = minPriority;
-    if (maxFee.lt(minMaxFee)) maxFee = minMaxFee;
-    if (maxFee.lt(maxPriority)) maxFee = maxPriority;
+    if (maxPriority < minPriority) maxPriority = minPriority;
+    if (maxFee < minMaxFee) maxFee = minMaxFee;
+    if (maxFee < maxPriority) maxFee = maxPriority;
 
     return {
       maxPriorityFeePerGas: maxPriority,
