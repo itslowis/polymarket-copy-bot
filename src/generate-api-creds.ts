@@ -1,12 +1,13 @@
 import dotenv from 'dotenv';
-import { Wallet } from 'ethers';
-import { ClobClient } from '@polymarket/clob-client';
+import { createWalletClient, http } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { polygon } from 'viem/chains';
+import { ClobClient, Chain } from '@polymarket/clob-client-v2';
 import * as fs from 'fs';
 
 dotenv.config();
 
 const HOST = 'https://clob.polymarket.com';
-const CHAIN_ID = 137;
 
 async function main(): Promise<void> {
   const privateKey = process.env.PRIVATE_KEY;
@@ -14,23 +15,19 @@ async function main(): Promise<void> {
     throw new Error('Missing PRIVATE_KEY in .env');
   }
 
-  const signer = new Wallet(privateKey);
-  const client = new ClobClient(
-    HOST,
-    CHAIN_ID,
+  const account = privateKeyToAccount(privateKey as `0x${string}`);
+  const signer = createWalletClient({ account, chain: polygon, transport: http() });
+
+  const client = new ClobClient({
+    host: HOST,
+    chain: Chain.POLYGON,
     signer,
-    undefined,
-    undefined,
-    undefined,
-    process.env.POLYMARKET_GEO_TOKEN || undefined
-  );
+  });
 
-  let creds = await client.deriveApiKey().catch(() => null);
-  if (!creds || (creds as any).error) {
-    creds = await client.createApiKey();
-  }
+  // createOrDeriveApiKey tries derive first, falls back to create
+  const creds = await client.createOrDeriveApiKey();
 
-  const apiKey = (creds as any)?.apiKey || (creds as any)?.key;
+  const apiKey = (creds as any)?.key || (creds as any)?.apiKey;
   const secret = (creds as any)?.secret;
   const passphrase = (creds as any)?.passphrase;
 

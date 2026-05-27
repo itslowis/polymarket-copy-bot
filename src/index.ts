@@ -8,7 +8,7 @@ import { RiskManager } from './risk-manager.js';
 
 class PolymarketCopyBot {
   private monitor: TradeMonitor;
-  private wsMonitor?: WebSocketMonitor;
+  private wsMonitor: WebSocketMonitor | undefined;
   private executor: TradeExecutor;
   private positions: PositionTracker;
   private risk: RiskManager;
@@ -34,7 +34,11 @@ class PolymarketCopyBot {
     console.log('🤖 Polymarket Copy Trading Bot');
     console.log('================================');
     console.log(`Target wallet: ${config.targetWallet}`);
-    console.log(`Position multiplier: ${config.trading.positionSizeMultiplier * 100}%`);
+    if (config.trading.positionSizeMode === 'fixed') {
+      console.log(`Position size: ${config.trading.fixedPositionSize} USDC (fixed)`);
+    } else {
+      console.log(`Position size: ${config.trading.positionSizeMultiplier * 100}% of original (multiplier)`);
+    }
     console.log(`Max trade size: ${config.trading.maxTradeSize} USDC`);
     console.log(`Order type: ${config.trading.orderType}`);
     console.log(`WebSocket: ${config.monitoring.useWebSocket ? 'Enabled' : 'Disabled'}`);
@@ -175,6 +179,7 @@ class PolymarketCopyBot {
 
       const { loaded, skipped } = this.positions.loadFromClobPositions(positions);
       const totalNotional = this.positions.getTotalNotional();
+      this.risk.initializeSessionNotional(totalNotional);
       console.log(`🧾 Positions loaded: ${loaded} (skipped ${skipped}), total notional ≈ ${totalNotional.toFixed(2)} USDC`);
     } catch (error: any) {
       console.log(`🧾 Positions reconciliation failed: ${error.message || 'Unknown error'}`);

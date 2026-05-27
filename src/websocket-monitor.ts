@@ -87,7 +87,7 @@ export class WebSocketMonitor {
         });
 
         this.ws.on('message', (data: WebSocket.Data) => {
-          this.handleMessage(data.toString());
+          void this.handleMessage(data.toString());
         });
 
         this.ws.on('close', (code: number, reason: Buffer) => {
@@ -108,6 +108,8 @@ export class WebSocketMonitor {
 
         setTimeout(() => {
           if (!this.isConnected) {
+            this.ws?.close();
+            this.ws = null;
             reject(new Error('WebSocket connection timeout'));
           }
         }, 10000);
@@ -225,7 +227,7 @@ export class WebSocketMonitor {
     console.log(`📡 Unsubscribed from market (user channel): ${conditionId}`);
   }
 
-  private handleMessage(data: string): void {
+  private async handleMessage(data: string): Promise<void> {
     if (!data || data === 'PING') {
       this.ws?.send('PONG');
       return;
@@ -243,7 +245,7 @@ export class WebSocketMonitor {
       }
 
       if (message.event_type === 'last_trade_price') {
-        this.handleTradeMessage(message as LastTradeMessage);
+        await this.handleTradeMessage(message as LastTradeMessage);
       }
     } catch (error) {
       console.error('Error parsing WebSocket message:', error);
@@ -296,13 +298,9 @@ export class WebSocketMonitor {
   private startPingInterval(): void {
     this.pingInterval = setInterval(() => {
       if (this.ws && this.isConnected) {
-        try {
-          this.ws.send('PING');
-        } catch {
-          this.ws.ping();
-        }
+        this.ws.send('PING');
       }
-    }, 10000); // Ping every 10 seconds
+    }, 10000);
   }
 
   private stopPingInterval(): void {
@@ -360,7 +358,7 @@ export class WebSocketMonitor {
   } {
     return {
       connected: this.isConnected,
-      subscribedMarkets: this.subscribedMarkets.size,
+      subscribedMarkets: this.channel === 'user' ? this.subscribedMarkets.size : this.subscribedAssets.size,
       reconnectAttempts: this.reconnectAttempts,
     };
   }
