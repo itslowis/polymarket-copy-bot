@@ -13,16 +13,25 @@ export const config = {
   rpcUrl: process.env.RPC_URL || 'https://polygon-rpc.com',
 
   // Polygon mainnet contracts used for approvals and balance checks.
+  // Verified against https://docs.polymarket.com/developers/contracts.
   contracts: {
-    // v2 exchange contracts (primary routing targets for clob-client-v2)
+    // Current exchanges, per the docs above.
     exchange: '0xE111180000d2663C0091e4f400237545B87B996B',
     negRiskExchange: '0xe2222d279d744050d28e00520010520000310F59',
-    // v1 exchange contracts (legacy routing; clob-client-v2 may still use these)
+
+    // Legacy v1 exchanges. These are NOT listed in Polymarket's public contract
+    // docs, but do not delete them: clob-client-v2 picks its exchange from the
+    // order version the CLOB server reports at `GET /version`, and signs against
+    // these addresses whenever that version is 1. The client force-refreshes the
+    // version and retries on an ORDER_VERSION_MISMATCH error, so the switch can
+    // happen mid-session. Approving only the v2 pair would break trading the
+    // moment the server fell back to v1.
     exchangeV1: '0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E',
     negRiskExchangeV1: '0xC5d563A36AE78145C45a50134d48A1215220f80a',
-    // token contracts
+
+    // Conditional Tokens (CTF)
     ctf: '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045',
-    // pUSD, Polymarket's USDC-backed collateral token (not USDC.e)
+    // pUSD CollateralToken proxy. Polymarket's collateral token, not USDC.e.
     pusd: '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB',
   },
 

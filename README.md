@@ -160,6 +160,9 @@ Polygon rejects transactions priced below its minimum, so these floors exist to 
 - Use a **dedicated wallet** for the bot. Do not reuse a wallet holding other assets.
 - Start with small `MAX_TRADE_SIZE` and `POSITION_MULTIPLIER` values and scale up only after validating behaviour.
 - The bot grants unlimited (`MaxUint256`) pUSD allowances to the Polymarket exchange contracts on first run, which is what the protocol expects but is worth understanding before you fund the wallet.
+- Approvals are granted to both the current and the legacy v1 exchange contracts. This is deliberate — the CLOB server reports which order version to use, and orders are signed against the v1 contracts when it reports version 1. See the comments in [src/config.ts](src/config.ts) before changing those addresses.
+
+All contract addresses are verified against [Polymarket's published contract list](https://docs.polymarket.com/developers/contracts).
 
 ## License
 
