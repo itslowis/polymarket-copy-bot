@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Lets the maintainer re-run CI by hand from the Actions tab.
+  workflow_dispatch:
 
 # Read-only by default. Note this workflow uses `pull_request`, not
 # `pull_request_target`: fork pull requests must never run untrusted code with a
