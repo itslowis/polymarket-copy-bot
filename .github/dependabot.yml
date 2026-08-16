@@ -1,0 +1,33 @@
+version: 2
+updates:
+  # Security and version updates for runtime dependencies. This project handles
+  # a private key, so dependency advisories matter more than usual here.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    groups:
+      # Batch routine bumps into one pull request to keep review load down.
+      # Security updates are still raised separately and immediately.
+      dev-dependencies:
+        dependency-type: development
+        update-types: ["minor", "patch"]
+    ignore:
+      # Major bumps of the trading stack change signing and contract routing.
+      # These need deliberate manual review, not an automated pull request.
+      - dependency-name: "@polymarket/clob-client-v2"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "ethers"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "viem"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    labels:
+      - dependencies

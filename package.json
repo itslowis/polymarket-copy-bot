@@ -16,7 +16,7 @@
     "trading-bot"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=20.10"
   },
   "scripts": {
     "start": "tsx src/index.ts",
@@ -31,7 +31,13 @@
     "dotenv": "^17.4.2",
     "ethers": "^6.16.0",
     "viem": "^2.46.3",
-    "ws": "^8.20.1"
+    "ws": "^8.21.0"
+  },
+  "comments": {
+    "overrides": "Forces a patched ws across the tree. @ethersproject/providers v5, pulled in by @polymarket/clob-client-v2, otherwise resolves ws@8.18.0, which has a known uninitialized-memory-disclosure advisory. Same major version, so this is a safe pin. Revisit once the client drops its ethers v5 dependency."
+  },
+  "overrides": {
+    "ws": "$ws"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

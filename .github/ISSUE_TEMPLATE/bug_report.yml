@@ -1,0 +1,76 @@
+name: Bug report
+description: Something is not working as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste your private key, seed phrase, API credentials, or raw `.env` file here.**
+        Issues are public and permanently indexed. Redact addresses and keys from any logs you attach.
+
+        For anything with security impact, do not file a public issue — see [SECURITY.md](../blob/main/SECURITY.md).
+
+  - type: checkboxes
+    id: no-secrets
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have removed all private keys, credentials, and secrets from everything below
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what actually occurred.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Set ORDER_TYPE=FOK
+        2. Start the bot with `npm start`
+        3. Target wallet places a BUY
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: Relevant console output. This is rendered as code, no backticks needed.
+      render: shell
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: Your settings with ALL secrets removed. Do not include PRIVATE_KEY or RPC_URL.
+      render: shell
+      placeholder: |
+        POSITION_SIZE_MODE=multiplier
+        POSITION_MULTIPLIER=0.1
+        MAX_TRADE_SIZE=5
+        ORDER_TYPE=FOK
+        USE_WEBSOCKET=true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: "v1.0.0, or commit 74da2f1"
+    validations:
+      required: true
+
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      description: Output of `node -v`
+      placeholder: "v20.11.0"
+    validations:
+      required: true

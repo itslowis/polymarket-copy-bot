@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Read-only by default. Note this workflow uses `pull_request`, not
+# `pull_request_target`: fork pull requests must never run untrusted code with a
+# writable token or access to repository secrets.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # @polymarket/clob-client-v2 requires >=20.10
+        node: ['20.10', '22', '24']
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # --ignore-scripts blocks dependency lifecycle scripts, so a pull request
+      # cannot execute arbitrary code on the runner just by being installed.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fail if a private key or .env is committed
+        run: |
+          if git ls-files --error-unmatch .env 2>/dev/null; then
+            echo "::error::.env is tracked in git. Only .env.example may be committed."
+            exit 1
+          fi
+
+          # A real 32-byte hex key, excluding the all-zero placeholder form.
+          if git grep -nIE '\b0x[0-9a-fA-F]{64}\b' -- . ':!package-lock.json' | grep -vE '0x0{64}'; then
+            echo "::error::A 64-character hex value that looks like a private key was found."
+            exit 1
+          fi
+
+          if git grep -nIE '^[[:space:]]*PRIVATE_KEY[[:space:]]*=[[:space:]]*.+' -- . ':!.env.example'; then
+            echo "::error::PRIVATE_KEY appears to have a value assigned in a tracked file."
+            exit 1
+          fi
+
+          echo "No committed secrets detected."

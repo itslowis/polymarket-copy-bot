@@ -1,0 +1,4 @@
+# Every file requires review from the maintainer.
+# Combined with "Require review from Code Owners" in branch protection, this
+# means no pull request can merge without @itslowis approving it.
+* @itslowis

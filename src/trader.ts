@@ -424,7 +424,7 @@ export class TradeExecutor {
         tokenId: originalTrade.tokenId,
       };
     } else {
-      const errorMsg = response.errorMsg || response.error || 'Unknown error';
+      const errorMsg = response.errorMsg || 'Unknown error';
       console.log(`❌ Order failed: ${errorMsg}`);
       throw new Error(`Order placement failed: ${errorMsg}`);
     }
@@ -479,7 +479,7 @@ export class TradeExecutor {
         tokenId: originalTrade.tokenId,
       };
     } else {
-      const errorMsg = response.errorMsg || response.error || 'Unknown error';
+      const errorMsg = response.errorMsg || 'Unknown error';
       console.log(`❌ Order failed: ${errorMsg}`);
       throw new Error(`Order placement failed: ${errorMsg}`);
     }

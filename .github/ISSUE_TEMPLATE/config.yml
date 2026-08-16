@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/itslowis/polymarket-copy-bot/security/advisories/new
+    about: Report privately. Never file a public issue for a security problem.
+  - name: Setup and usage questions
+    url: https://github.com/itslowis/polymarket-copy-bot/discussions
+    about: Ask here rather than opening a bug report.
+  - name: Polymarket platform issues
+    url: https://docs.polymarket.com
+    about: Problems with Polymarket's API, contracts, or your account are not bugs in this bot.

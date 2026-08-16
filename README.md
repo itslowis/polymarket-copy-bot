@@ -16,7 +16,7 @@ API credentials are derived automatically from your `PRIVATE_KEY` at startup and
 
 ## Prerequisites
 
-- Node.js 18+ and npm
+- Node.js 20.10+ and npm (required by `@polymarket/clob-client-v2`)
 - A Polygon EOA wallet funded with **pUSD** (trading collateral) and a small amount of **POL** for gas
 - A Polygon RPC URL ([QuickNode](https://www.quicknode.com) recommended; the bot falls back to the public `https://polygon-rpc.com`)
 
