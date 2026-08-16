@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+
 dotenv.config();
 
 function parseCsv(value?: string): string[] {
@@ -6,14 +7,10 @@ function parseCsv(value?: string): string[] {
   return value.split(',').map((v) => v.trim()).filter(Boolean);
 }
 
-const useWebSocket = process.env.USE_WEBSOCKET !== 'false';
-
 export const config = {
   targetWallet: process.env.TARGET_WALLET || '',
   privateKey: process.env.PRIVATE_KEY || '',
-  polymarketGeoToken: process.env.POLYMARKET_GEO_TOKEN || '',
   rpcUrl: process.env.RPC_URL || 'https://polygon-rpc.com',
-  chainId: 137,
 
   // Polygon mainnet contracts used for approvals and balance checks.
   contracts: {
@@ -25,8 +22,8 @@ export const config = {
     negRiskExchangeV1: '0xC5d563A36AE78145C45a50134d48A1215220f80a',
     // token contracts
     ctf: '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045',
-    usdc: '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB',
-    negRiskAdapter: '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296',
+    // pUSD, Polymarket's USDC-backed collateral token (not USDC.e)
+    pusd: '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB',
   },
 
   trading: {
@@ -46,24 +43,49 @@ export const config = {
   },
 
   monitoring: {
-    pollInterval: parseInt(process.env.POLL_INTERVAL || '500'),
-    useWebSocket,
+    pollInterval: parseInt(process.env.POLL_INTERVAL || '2000'),
+    useWebSocket: process.env.USE_WEBSOCKET !== 'false',
     useUserChannel: process.env.USE_USER_CHANNEL === 'true',
     wsAssetIds: parseCsv(process.env.WS_ASSET_IDS),
     wsMarketIds: parseCsv(process.env.WS_MARKET_IDS),
-  }
+  },
+
+  // Floors for approval txs, since Polygon rejects transactions priced too low.
+  gas: {
+    minPriorityFeeGwei: parseFloat(process.env.MIN_PRIORITY_FEE_GWEI || '30'),
+    minMaxFeeGwei: parseFloat(process.env.MIN_MAX_FEE_GWEI || '60'),
+  },
 };
 
 export function validateConfig(): void {
-  const required = ['targetWallet', 'privateKey'];
-  for (const key of required) {
-    if (!config[key as keyof typeof config]) {
-      throw new Error(`Missing required config: ${key}`);
-    }
+  if (!config.targetWallet) {
+    throw new Error('Missing required config: TARGET_WALLET');
+  }
+  if (!config.privateKey) {
+    throw new Error('Missing required config: PRIVATE_KEY');
+  }
+  if (!/^0x[0-9a-fA-F]{40}$/.test(config.targetWallet)) {
+    throw new Error(`Invalid TARGET_WALLET: expected a 0x-prefixed 40-character address`);
+  }
+  if (!/^0x[0-9a-fA-F]{64}$/.test(config.privateKey)) {
+    throw new Error('Invalid PRIVATE_KEY: expected a 0x-prefixed 64-character hex key');
   }
 
-  console.log('ℹ️  API credentials will be derived/generated from PRIVATE_KEY at startup');
+  const { positionSizeMode, maxTradeSize, minTradeSize, orderType } = config.trading;
+
+  if (positionSizeMode !== 'multiplier' && positionSizeMode !== 'fixed') {
+    throw new Error(`Invalid POSITION_SIZE_MODE: ${positionSizeMode} (expected 'multiplier' or 'fixed')`);
+  }
+  if (orderType !== 'LIMIT' && orderType !== 'FOK' && orderType !== 'FAK') {
+    throw new Error(`Invalid ORDER_TYPE: ${orderType} (expected 'LIMIT', 'FOK' or 'FAK')`);
+  }
+  if (!(maxTradeSize > 0)) {
+    throw new Error(`Invalid MAX_TRADE_SIZE: ${maxTradeSize} (must be greater than 0)`);
+  }
+  if (minTradeSize > maxTradeSize) {
+    throw new Error(`MIN_TRADE_SIZE (${minTradeSize}) cannot exceed MAX_TRADE_SIZE (${maxTradeSize})`);
+  }
 
   console.log('✅ Configuration validated');
-  console.log(`   Auth: EOA (signature type 0)`);
+  console.log('   Auth: EOA (signature type 0), API credentials derived from PRIVATE_KEY at startup');
 }

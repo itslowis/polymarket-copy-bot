@@ -3,8 +3,17 @@ import { config } from './config.js';
 
 export type TradeOutcome = 'YES' | 'NO' | 'UNKNOWN';
 
+export function normalizeOutcome(value: unknown): TradeOutcome {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  if (normalized === 'YES' || normalized === 'NO') {
+    return normalized;
+  }
+  return 'UNKNOWN';
+}
+
 export interface Trade {
-  txHash: string;
+  /** Absent for WebSocket trades, which carry no transaction hash. */
+  txHash?: string;
   timestamp: number;
   market: string;
   tokenId: string;
@@ -17,6 +26,7 @@ export interface Trade {
 export class TradeMonitor {
   private lastProcessedTimestamp: number = 0;
   private processedTradeIds: Set<string> = new Set();
+  private readonly maxProcessedIds = 10000;
 
   async initialize(): Promise<void> {
     this.lastProcessedTimestamp = Date.now();
@@ -62,21 +72,14 @@ export class TradeMonitor {
       timestamp: apiTrade.timestamp * 1000,
       market: apiTrade.conditionId || apiTrade.market,
       tokenId: apiTrade.asset,
-      side: apiTrade.side.toUpperCase() as 'BUY' | 'SELL',
+      side: String(apiTrade.side ?? '').toUpperCase() === 'SELL' ? 'SELL' : 'BUY',
       price: parseFloat(apiTrade.price),
       size: parseFloat(apiTrade.usdcSize || apiTrade.size),
-      outcome: this.normalizeOutcome(apiTrade.outcome),
+      outcome: normalizeOutcome(apiTrade.outcome),
     };
   }
 
-  private normalizeOutcome(value: any): TradeOutcome {
-    const normalized = String(value ?? '').trim().toUpperCase();
-    if (normalized === 'YES' || normalized === 'NO') {
-      return normalized;
-    }
-    return 'UNKNOWN';
-  }
-  
+
   async pollForNewTrades(callback: (trade: Trade) => Promise<void>): Promise<void> {
     try {
       const trades = await this.fetchTradesFromDataApi();
@@ -90,7 +93,8 @@ export class TradeMonitor {
       let newTradesCount = 0;
 
       for (const trade of sortedTrades) {
-        const tradeId = trade.txHash;
+        const tradeId =
+          trade.txHash || `${trade.tokenId}|${trade.side}|${trade.size}|${trade.price}|${trade.timestamp}`;
 
         if (this.processedTradeIds.has(tradeId)) {
           continue;
@@ -104,7 +108,7 @@ export class TradeMonitor {
         this.lastProcessedTimestamp = Math.max(this.lastProcessedTimestamp, trade.timestamp);
         newTradesCount++;
 
-        console.log(`🎯 New trade detected: ${trade.side} ${trade.size} USDC @ ${trade.price.toFixed(3)}`);
+        console.log(`🎯 New trade detected: ${trade.side} ${trade.size} pUSD @ ${trade.price.toFixed(3)}`);
         console.log(`   Time: ${new Date(trade.timestamp).toISOString()}`);
         await callback(trade);
       }
@@ -118,9 +122,10 @@ export class TradeMonitor {
   }
 
   pruneProcessedHashes(): void {
-    if (this.processedTradeIds.size > 10000) {
-      const entries = Array.from(this.processedTradeIds);
-      this.processedTradeIds = new Set(entries.slice(-5000));
+    if (this.processedTradeIds.size <= this.maxProcessedIds) {
+      return;
     }
+    const entries = Array.from(this.processedTradeIds);
+    this.processedTradeIds = new Set(entries.slice(-Math.floor(this.maxProcessedIds / 2)));
   }
 }

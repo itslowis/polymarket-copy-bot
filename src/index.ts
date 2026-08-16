@@ -35,20 +35,18 @@ class PolymarketCopyBot {
     console.log('================================');
     console.log(`Target wallet: ${config.targetWallet}`);
     if (config.trading.positionSizeMode === 'fixed') {
-      console.log(`Position size: ${config.trading.fixedPositionSize} USDC (fixed)`);
+      console.log(`Position size: ${config.trading.fixedPositionSize} pUSD (fixed)`);
     } else {
       console.log(`Position size: ${config.trading.positionSizeMultiplier * 100}% of original (multiplier)`);
     }
-    console.log(`Max trade size: ${config.trading.maxTradeSize} USDC`);
+    console.log(`Max trade size: ${config.trading.maxTradeSize} pUSD`);
     console.log(`Order type: ${config.trading.orderType}`);
     console.log(`WebSocket: ${config.monitoring.useWebSocket ? 'Enabled' : 'Disabled'}`);
     if (config.risk.maxSessionNotional > 0 || config.risk.maxPerMarketNotional > 0) {
-      console.log(`Risk caps: session=${config.risk.maxSessionNotional || '∞'} USDC, per-market=${config.risk.maxPerMarketNotional || '∞'} USDC`);
+      console.log(`Risk caps: session=${config.risk.maxSessionNotional || '∞'} pUSD, per-market=${config.risk.maxPerMarketNotional || '∞'} pUSD`);
     }
     console.log(`Auth mode: EOA (signature type 0)`);
     console.log('================================\n');
-
-    validateConfig();
 
     this.botStartTime = Date.now();
     console.log(`⏰ Bot start time: ${new Date(this.botStartTime).toISOString()}`);
@@ -126,7 +124,7 @@ class PolymarketCopyBot {
     console.log(`   Time: ${new Date(trade.timestamp).toISOString()}`);
     console.log(`   Market: ${trade.market}`);
     console.log(`   Side: ${trade.side} ${trade.outcome}`);
-    console.log(`   Size: ${trade.size} USDC @ ${trade.price.toFixed(3)}`);
+    console.log(`   Size: ${trade.size} pUSD @ ${trade.price.toFixed(3)}`);
     console.log(`   Token ID: ${trade.tokenId}`);
     console.log('='.repeat(50));
 
@@ -152,7 +150,6 @@ class PolymarketCopyBot {
         trade,
         notional: result.copyNotional,
         shares: result.copyShares,
-        price: result.price,
         side: result.side,
       });
       this.stats.tradesCopied++;
@@ -180,7 +177,7 @@ class PolymarketCopyBot {
       const { loaded, skipped } = this.positions.loadFromClobPositions(positions);
       const totalNotional = this.positions.getTotalNotional();
       this.risk.initializeSessionNotional(totalNotional);
-      console.log(`🧾 Positions loaded: ${loaded} (skipped ${skipped}), total notional ≈ ${totalNotional.toFixed(2)} USDC`);
+      console.log(`🧾 Positions loaded: ${loaded} (skipped ${skipped}), total notional ≈ ${totalNotional.toFixed(2)} pUSD`);
     } catch (error: any) {
       console.log(`🧾 Positions reconciliation failed: ${error.message || 'Unknown error'}`);
     }
@@ -202,7 +199,7 @@ class PolymarketCopyBot {
     console.log(`   Trades detected: ${this.stats.tradesDetected}`);
     console.log(`   Trades copied: ${this.stats.tradesCopied}`);
     console.log(`   Trades failed: ${this.stats.tradesFailed}`);
-    console.log(`   Total volume: ${this.stats.totalVolume.toFixed(2)} USDC`);
+    console.log(`   Total volume: ${this.stats.totalVolume.toFixed(2)} pUSD`);
   }
   
   private sleep(ms: number): Promise<void> {
@@ -233,8 +230,19 @@ class PolymarketCopyBot {
 }
 
 async function main() {
+  // Must run before the bot is constructed: TradeExecutor builds a wallet from
+  // PRIVATE_KEY in its constructor and would otherwise throw a raw ethers error
+  // instead of a readable "missing config" message.
+  try {
+    validateConfig();
+  } catch (error: any) {
+    console.error(`❌ ${error.message}`);
+    console.error('   Copy .env.example to .env and fill in the required values.');
+    process.exit(1);
+  }
+
   const bot = new PolymarketCopyBot();
-  
+
   process.on('SIGINT', () => {
     console.log('\n\nReceived SIGINT, shutting down...');
     bot.stop();

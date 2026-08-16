@@ -1,7 +1,14 @@
 node_modules/
 dist/
 *.tsbuildinfo
-*.md
-!README.md
+
+# Secrets — only the template is tracked
 .env
+.env.*
+!.env.example
 .polymarket-api-creds
+
+# Logs / OS cruft
+*.log
+npm-debug.log*
+.DS_Store

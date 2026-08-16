@@ -1,5 +1,12 @@
 import type { Trade } from './monitor.js';
 
+export interface FillRecord {
+  trade: Trade;
+  notional: number;
+  shares: number;
+  side: 'BUY' | 'SELL';
+}
+
 export interface PositionState {
   tokenId: string;
   market: string;
@@ -61,14 +68,8 @@ export class PositionTracker {
     return { loaded, skipped };
   }
 
-  recordFill(params: {
-    trade: Trade;
-    notional: number;
-    shares: number;
-    price: number;
-    side: 'BUY' | 'SELL';
-  }): void {
-    const { trade, notional, shares, price, side } = params;
+  recordFill(params: FillRecord): void {
+    const { trade, notional, shares, side } = params;
     const key = trade.tokenId;
     const existing = this.positions.get(key);
 
@@ -91,14 +92,6 @@ export class PositionTracker {
     };
 
     this.positions.set(key, updated);
-  }
-
-  getPosition(tokenId: string): PositionState | undefined {
-    return this.positions.get(tokenId);
-  }
-
-  getPositions(): PositionState[] {
-    return Array.from(this.positions.values());
   }
 
   getNotional(tokenId: string): number {

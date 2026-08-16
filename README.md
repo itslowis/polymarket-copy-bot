@@ -2,21 +2,23 @@
 
 A TypeScript bot that watches a target Polymarket wallet and mirrors its `BUY` trades to your own account with configurable sizing and risk controls.
 
+> **Disclaimer.** This software is provided as-is, for educational purposes. Copy trading carries significant financial risk and you can lose your entire balance. The past behaviour of a target wallet is no guarantee of future performance. You are solely responsible for any funds you put at risk and for complying with the laws and platform terms that apply to you.
+
 ## How It Works
 
-1. **Monitors** a target wallet for new trades via REST polling (and optionally WebSocket for lower latency).
-2. **Filters** — only `BUY` trades are copied; `SELL` trades are skipped.
-3. **Sizes** the copy trade using `POSITION_MULTIPLIER` and clamps it between `MIN_TRADE_SIZE` and `MAX_TRADE_SIZE`.
+1. **Monitors** a target wallet for new trades via REST polling, and optionally via WebSocket for lower latency.
+2. **Filters** — only `BUY` trades are copied. `SELL` trades are detected and skipped.
+3. **Sizes** the copy trade from either a multiplier of the original or a fixed amount, then clamps it between `MIN_TRADE_SIZE` and `MAX_TRADE_SIZE`.
 4. **Risk checks** — optional session-level and per-market notional caps block trades that would exceed your limits.
 5. **Executes** the order on Polymarket's CLOB as a `LIMIT` (GTC), `FOK`, or `FAK` order.
 
-API credentials are derived automatically from your `PRIVATE_KEY` at startup — no dashboard setup needed.
+API credentials are derived automatically from your `PRIVATE_KEY` at startup and held in memory for the session only — there is no dashboard setup and nothing is written to disk.
 
 ## Prerequisites
 
 - Node.js 18+ and npm
 - A Polygon EOA wallet funded with **pUSD** (trading collateral) and a small amount of **POL** for gas
-- A Polygon RPC URL ([QuickNode](https://www.quicknode.com) recommended)
+- A Polygon RPC URL ([QuickNode](https://www.quicknode.com) recommended; the bot falls back to the public `https://polygon-rpc.com`)
 
 ## Funding Your Wallet
 
@@ -35,11 +37,9 @@ Call `wrap()` on the CollateralOnramp contract (`0x93070a847efEf7F70739046A929D4
 // 2. Call wrap(USDCE_ADDRESS, your_wallet, amount)
 ```
 
-See [Polymarket's pUSD docs](https://docs.polymarket.com) for the full example.
+See [Polymarket's docs](https://docs.polymarket.com) for the full example.
 
-Once pUSD is in your wallet, the bot automatically approves all required exchange contracts on first run.
-
-You also need **~0.5 POL** for gas. The bot will warn you on startup if your POL balance drops below 0.05.
+Once pUSD is in your wallet, the bot automatically approves all required exchange contracts on first run. You also need **~0.5 POL** for gas; the bot warns on startup if your POL balance drops below 0.05.
 
 ## Setup
 
@@ -60,19 +60,13 @@ cp .env.example .env
 | Variable | Description |
 |---|---|
 | `TARGET_WALLET` | The Polymarket wallet address to copy |
-| `PRIVATE_KEY` | Your EOA private key (used to sign and submit orders) |
+| `PRIVATE_KEY` | Your EOA private key, used to sign and submit orders |
 | `RPC_URL` | Polygon JSON-RPC endpoint |
-
-**4. (Optional) Preview your generated API credentials**
-
-```bash
-npm run generate-api-creds
-```
 
 ## Running
 
 ```bash
-# Production
+# Run directly from TypeScript
 npm start
 
 # Development (watch mode with hot reload)
@@ -81,36 +75,45 @@ npm run dev
 # Compile then run
 npm run build
 npm run start:prod
+
+# Typecheck without emitting
+npm run typecheck
 ```
+
+Stop the bot with `Ctrl+C`. It prints session statistics on shutdown.
 
 ## Configuration
 
-All settings are controlled via environment variables. See `.env.example` for the full list.
+All settings are environment variables. See [.env.example](.env.example) for a copy-paste template.
 
 ### Core
 
 | Variable | Default | Description |
 |---|---|---|
-| `TARGET_WALLET` | — | Wallet address to follow |
-| `PRIVATE_KEY` | — | Your EOA private key |
+| `TARGET_WALLET` | — | Wallet address to follow (required) |
+| `PRIVATE_KEY` | — | Your EOA private key (required) |
 | `RPC_URL` | `https://polygon-rpc.com` | Polygon RPC endpoint |
 
 ### Trade Sizing
 
 | Variable | Default | Description |
 |---|---|---|
-| `POSITION_MULTIPLIER` | `0.1` | Fraction of the original trade size to copy (e.g. `0.1` = 10%) |
-| `MAX_TRADE_SIZE` | `100` | Maximum copy trade size in pUSD |
-| `MIN_TRADE_SIZE` | `1` | Minimum copy trade size in pUSD |
-| `SLIPPAGE_TOLERANCE` | `0.02` | Max price slippage as a decimal (e.g. `0.02` = 2%) |
-| `ORDER_TYPE` | `FOK` | Order type: `LIMIT` (GTC), `FOK` (fill-or-kill), or `FAK` (fill-and-kill) |
+| `POSITION_SIZE_MODE` | `multiplier` | `multiplier` scales the target's size; `fixed` always trades `FIXED_POSITION_SIZE` |
+| `POSITION_MULTIPLIER` | `0.1` | Fraction of the original trade size to copy (`0.1` = 10%), used in `multiplier` mode |
+| `FIXED_POSITION_SIZE` | `5` | Trade size in pUSD, used in `fixed` mode |
+| `MAX_TRADE_SIZE` | `100` | Upper clamp on the copy trade size, in pUSD |
+| `MIN_TRADE_SIZE` | `1` | Lower clamp on the copy trade size, in pUSD |
+| `SLIPPAGE_TOLERANCE` | `0.02` | Max price slippage as a decimal (`0.02` = 2%) |
+| `ORDER_TYPE` | `FOK` | `LIMIT` (GTC), `FOK` (fill-or-kill), or `FAK` (fill-and-kill) |
+
+`FOK` and `FAK` orders are subject to Polymarket's 1 pUSD market minimum, which overrides a lower `MIN_TRADE_SIZE`.
 
 ### Risk Controls
 
 | Variable | Default | Description |
 |---|---|---|
 | `MAX_SESSION_NOTIONAL` | `0` | Max total pUSD spent per bot session (`0` = no cap) |
-| `MAX_PER_MARKET_NOTIONAL` | `0` | Max total pUSD spent per market (`0` = no cap) |
+| `MAX_PER_MARKET_NOTIONAL` | `0` | Max total pUSD held per market (`0` = no cap) |
 
 ### Monitoring
 
@@ -118,20 +121,46 @@ All settings are controlled via environment variables. See `.env.example` for th
 |---|---|---|
 | `POLL_INTERVAL` | `2000` | REST polling interval in milliseconds |
 | `USE_WEBSOCKET` | `true` | Enable WebSocket for faster trade detection |
-| `USE_USER_CHANNEL` | `false` | Use the authenticated user WS channel (requires valid API creds) |
-| `WS_ASSET_IDS` | — | Comma-separated token IDs to subscribe to via WebSocket |
-| `WS_MARKET_IDS` | — | Comma-separated market condition IDs (user channel only) |
+| `USE_USER_CHANNEL` | `false` | Use the authenticated user WS channel instead of the public market channel |
+| `WS_ASSET_IDS` | — | Comma-separated token IDs to pre-subscribe to (market channel) |
+| `WS_MARKET_IDS` | — | Comma-separated condition IDs to pre-subscribe to (user channel) |
+
+### Gas
+
+| Variable | Default | Description |
+|---|---|---|
+| `MIN_PRIORITY_FEE_GWEI` | `30` | Floor for the priority fee on approval transactions |
+| `MIN_MAX_FEE_GWEI` | `60` | Floor for the max fee on approval transactions |
+
+Polygon rejects transactions priced below its minimum, so these floors exist to keep approval transactions from getting stuck. Raise them if approvals are slow to confirm.
+
+## Project Structure
+
+| File | Responsibility |
+|---|---|
+| [src/index.ts](src/index.ts) | Orchestration, dedup, session stats, shutdown handling |
+| [src/config.ts](src/config.ts) | Environment parsing and validation |
+| [src/monitor.ts](src/monitor.ts) | REST polling of the Polymarket data API |
+| [src/websocket-monitor.ts](src/websocket-monitor.ts) | WebSocket feed with auto-reconnect |
+| [src/trader.ts](src/trader.ts) | Order construction, approvals, balance checks, retries |
+| [src/positions.ts](src/positions.ts) | Position and average-price tracking |
+| [src/risk-manager.ts](src/risk-manager.ts) | Notional cap enforcement |
 
 ## Notes
 
-- The bot only copies trades that occur **after startup**. Any trades made by the target wallet before you start are ignored.
-- REST polling is always active as a fallback, even when WebSocket is enabled. Frequent WebSocket reconnects are normal.
-- Duplicate trades (detected by tx hash or trade fingerprint) are automatically deduplicated.
-- Existing open positions are reconciled at startup and counted toward per-market notional caps.
+- The bot only copies trades that occur **after startup**. Earlier trades by the target wallet are ignored.
+- REST polling stays active as a fallback even when WebSocket is enabled. Occasional WebSocket reconnects are normal.
+- Duplicate trades are deduplicated by transaction hash where available, and otherwise by a trade fingerprint of token, side, size, price and timestamp.
+- Existing open positions are reconciled at startup and counted toward the notional caps.
+- Failed trades are not retried once the retry budget is exhausted; the bot logs the reason and moves on to the next trade.
 
 ## Security
 
-- Never commit your `.env` file.
-- Use a **dedicated wallet** for bot trading — do not reuse a wallet that holds other assets.
-- Start with small `MAX_TRADE_SIZE` and `POSITION_MULTIPLIER` values and scale up only after validating behavior.
-- Copy trading carries significant financial risk. Past behavior of a target wallet is no guarantee of future performance.
+- Never commit your `.env` file. Only `.env.example` is tracked.
+- Use a **dedicated wallet** for the bot. Do not reuse a wallet holding other assets.
+- Start with small `MAX_TRADE_SIZE` and `POSITION_MULTIPLIER` values and scale up only after validating behaviour.
+- The bot grants unlimited (`MaxUint256`) pUSD allowances to the Polymarket exchange contracts on first run, which is what the protocol expects but is worth understanding before you fund the wallet.
+
+## License
+
+[MIT](LICENSE)

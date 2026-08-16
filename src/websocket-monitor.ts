@@ -1,14 +1,10 @@
 import WebSocket from 'ws';
 import { config } from './config.js';
+import { normalizeOutcome } from './monitor.js';
 import type { Trade } from './monitor.js';
 
 interface WebSocketMessage {
   event_type?: string;
-  asset_id?: string;
-  market?: string;
-  price?: string;
-  size?: string;
-  channel?: string;
   event?: string;
 }
 
@@ -43,6 +39,8 @@ export class WebSocketMonitor {
   private subscribedAssets = new Set<string>();
   private subscribedMarkets = new Set<string>();
   private pingInterval: NodeJS.Timeout | null = null;
+  private readonly CONNECT_TIMEOUT = 10000;
+  private readonly PING_INTERVAL = 10000;
   private readonly WS_URL_MARKET = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
   private readonly WS_URL_USER = 'wss://ws-subscriptions-clob.polymarket.com/ws/user';
   private channel: WsChannel = 'market';
@@ -72,50 +70,53 @@ export class WebSocketMonitor {
 
   private async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      try {
-        console.log('🔌 Connecting to Polymarket WebSocket...');
-        const url = this.channel === 'user' ? this.WS_URL_USER : this.WS_URL_MARKET;
-        this.ws = new WebSocket(url);
+      console.log('🔌 Connecting to Polymarket WebSocket...');
+      const url = this.channel === 'user' ? this.WS_URL_USER : this.WS_URL_MARKET;
+      const ws = new WebSocket(url);
+      this.ws = ws;
 
-        this.ws.on('open', () => {
-          console.log('✅ WebSocket connected');
-          this.isConnected = true;
-          this.reconnectAttempts = 0;
-          this.startPingInterval();
-          this.sendInitialSubscribe();
-          resolve();
-        });
+      // Cleared as soon as the connection settles, so a live socket does not
+      // keep a dangling timer holding the event loop open.
+      const timeout = setTimeout(() => {
+        ws.close();
+        reject(new Error('WebSocket connection timeout'));
+      }, this.CONNECT_TIMEOUT);
 
-        this.ws.on('message', (data: WebSocket.Data) => {
-          void this.handleMessage(data.toString());
-        });
+      ws.on('open', () => {
+        clearTimeout(timeout);
+        console.log('✅ WebSocket connected');
+        this.isConnected = true;
+        this.reconnectAttempts = 0;
+        this.startPingInterval();
+        this.sendInitialSubscribe();
+        resolve();
+      });
 
-        this.ws.on('close', (code: number, reason: Buffer) => {
-          const reasonText = reason?.toString() || 'no reason';
-          console.log(`❌ WebSocket disconnected (code=${code}, reason=${reasonText})`);
-          this.isConnected = false;
+      ws.on('message', (data: WebSocket.Data) => {
+        void this.handleMessage(data.toString());
+      });
+
+      ws.on('close', (code: number, reason: Buffer) => {
+        clearTimeout(timeout);
+        const reasonText = reason?.toString() || 'no reason';
+        console.log(`❌ WebSocket disconnected (code=${code}, reason=${reasonText})`);
+        this.isConnected = false;
+        // Only drop the reference if this is still the active socket; a newer
+        // connection attempt may already have replaced it.
+        if (this.ws === ws) {
           this.ws = null;
-          this.stopPingInterval();
-          if (this.hasSubscriptions()) {
-            this.attemptReconnect();
-          }
-        });
+        }
+        this.stopPingInterval();
+        if (this.hasSubscriptions()) {
+          this.attemptReconnect();
+        }
+      });
 
-        this.ws.on('error', (error: Error) => {
-          console.error('WebSocket error:', error.message);
-          reject(error);
-        });
-
-        setTimeout(() => {
-          if (!this.isConnected) {
-            this.ws?.close();
-            this.ws = null;
-            reject(new Error('WebSocket connection timeout'));
-          }
-        }, 10000);
-      } catch (error) {
+      ws.on('error', (error: Error) => {
+        clearTimeout(timeout);
+        console.error('WebSocket error:', error.message);
         reject(error);
-      }
+      });
     });
   }
 
@@ -190,43 +191,6 @@ export class WebSocketMonitor {
     console.log(`📡 Subscribed to market (user channel): ${conditionId}`);
   }
 
-  async unsubscribeFromMarket(tokenId: string): Promise<void> {
-    if (this.channel !== 'market') {
-      return;
-    }
-    if (!this.isConnected || !this.ws) {
-      return;
-    }
-
-    const unsubscribeMessage = {
-      assets_ids: [tokenId],
-      operation: 'unsubscribe',
-    };
-
-    this.ws.send(JSON.stringify(unsubscribeMessage));
-    this.subscribedAssets.delete(tokenId);
-    console.log(`📡 Unsubscribed from market: ${tokenId}`);
-  }
-
-  async unsubscribeFromCondition(conditionId: string): Promise<void> {
-    if (this.channel !== 'user') {
-      return;
-    }
-    if (!this.isConnected || !this.ws) {
-      return;
-    }
-
-    const unsubscribeMessage = {
-      markets: [conditionId],
-      operation: 'unsubscribe',
-      auth: this.buildWsAuth(),
-    };
-
-    this.ws.send(JSON.stringify(unsubscribeMessage));
-    this.subscribedMarkets.delete(conditionId);
-    console.log(`📡 Unsubscribed from market (user channel): ${conditionId}`);
-  }
-
   private async handleMessage(data: string): Promise<void> {
     if (!data || data === 'PING') {
       this.ws?.send('PONG');
@@ -265,18 +229,20 @@ export class WebSocketMonitor {
       const rawTimestamp = message.timestamp || Date.now();
       const normalizedTimestamp = rawTimestamp < 1_000_000_000_000 ? rawTimestamp * 1000 : rawTimestamp;
 
+      // No tx hash on this feed. Deliberately left unset so the consumer
+      // deduplicates on the trade fingerprint instead of a synthetic id that
+      // would be unique on every message and therefore never match.
       const trade: Trade = {
-        txHash: `ws-${Date.now()}`,
         timestamp: normalizedTimestamp,
         market: message.market,
         tokenId: message.asset_id,
         side: message.side,
         price: parseFloat(message.price),
         size: parseFloat(message.size),
-        outcome: this.normalizeOutcome(message.outcome),
+        outcome: normalizeOutcome(message.outcome),
       };
 
-      console.log(`⚡ WebSocket trade detected: ${trade.side} ${trade.size} USDC @ ${trade.price.toFixed(3)}`);
+      console.log(`⚡ WebSocket trade detected: ${trade.side} ${trade.size} pUSD @ ${trade.price.toFixed(3)}`);
 
       // Trigger callback
       if (this.onTradeCallback) {
@@ -287,20 +253,12 @@ export class WebSocketMonitor {
     }
   }
 
-  private normalizeOutcome(value?: string): 'YES' | 'NO' | 'UNKNOWN' {
-    const normalized = String(value ?? '').trim().toUpperCase();
-    if (normalized === 'YES' || normalized === 'NO') {
-      return normalized;
-    }
-    return 'UNKNOWN';
-  }
-
   private startPingInterval(): void {
     this.pingInterval = setInterval(() => {
       if (this.ws && this.isConnected) {
         this.ws.send('PING');
       }
-    }, 10000);
+    }, this.PING_INTERVAL);
   }
 
   private stopPingInterval(): void {
@@ -349,18 +307,6 @@ export class WebSocketMonitor {
     }
     this.isConnected = false;
     console.log('🔌 WebSocket connection closed');
-  }
-
-  getConnectionStatus(): {
-    connected: boolean;
-    subscribedMarkets: number;
-    reconnectAttempts: number;
-  } {
-    return {
-      connected: this.isConnected,
-      subscribedMarkets: this.channel === 'user' ? this.subscribedMarkets.size : this.subscribedAssets.size,
-      reconnectAttempts: this.reconnectAttempts,
-    };
   }
 
   private buildWsAuth(): { apikey: string; apiKey: string; secret: string; passphrase: string } | undefined {

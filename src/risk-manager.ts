@@ -1,6 +1,7 @@
 import type { Trade } from './monitor.js';
 import { config } from './config.js';
 import { PositionTracker } from './positions.js';
+import type { FillRecord } from './positions.js';
 
 export interface RiskCheckResult {
   allowed: boolean;
@@ -48,18 +49,8 @@ export class RiskManager {
     this.sessionNotional = notional;
   }
 
-  recordFill(params: {
-    trade: Trade;
-    notional: number;
-    shares: number;
-    price: number;
-    side: 'BUY' | 'SELL';
-  }): void {
+  recordFill(params: FillRecord): void {
     this.sessionNotional += params.notional;
     this.positions.recordFill(params);
-  }
-
-  getSessionNotional(): number {
-    return this.sessionNotional;
   }
 }

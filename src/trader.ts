@@ -5,13 +5,13 @@ import { polygon } from 'viem/chains';
 import { ClobClient, Side, OrderType, AssetType, Chain } from '@polymarket/clob-client-v2';
 import { config } from './config.js';
 import type { Trade } from './monitor.js';
+import type { WsAuth } from './websocket-monitor.js';
 
 interface MarketMetadata {
   tickSize: number;
   tickSizeStr: string;
   negRisk: boolean;
   feeRateBps: number;
-  conditionId?: string;
   timestamp: number;
 }
 
@@ -46,10 +46,10 @@ export class TradeExecutor {
   private provider: ethers.JsonRpcProvider;
   private viemWallet: ReturnType<typeof createWalletClient>;
   private clobClient: ClobClient;
-  private apiCreds?: { apiKey: string; secret: string; passphrase: string };
+  private apiCreds?: WsAuth;
   private marketCache: Map<string, MarketMetadata> = new Map();
   private readonly CACHE_TTL = 3600000;
-  private usdcDecimals?: number;
+  private collateralDecimals?: number;
   private balanceCache: Map<string, BalanceData> = new Map();
   private readonly BALANCE_CACHE_TTL = 5000;
   private readonly RETRY_CONFIG: RetryConfig = {
@@ -69,8 +69,6 @@ export class TradeExecutor {
     'function isApprovedForAll(address owner, address operator) view returns (bool)',
     'function setApprovalForAll(address operator, bool approved)',
   ];
-  private readonly MIN_PRIORITY_FEE_GWEI = parseFloat(process.env.MIN_PRIORITY_FEE_GWEI || '30');
-  private readonly MIN_MAX_FEE_GWEI = parseFloat(process.env.MIN_MAX_FEE_GWEI || '60');
 
   constructor() {
     this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
@@ -140,9 +138,7 @@ export class TradeExecutor {
       throw new Error(`Could not create/derive API key: ${errMsg}`);
     }
 
-    console.log(`✅ API credentials generated!`);
-    console.log(`   Credentials loaded in memory for this session`);
-    console.log(`   To export reusable values, run: npm run generate-api-creds (writes .polymarket-api-creds)`);
+    console.log(`✅ API credentials generated (held in memory for this session only)`);
 
     this.apiCreds = {
       apiKey,
@@ -163,22 +159,10 @@ export class TradeExecutor {
     });
   }
 
-  getWsAuth(): { apiKey: string; secret: string; passphrase: string } | undefined {
+  getWsAuth(): WsAuth | undefined {
     return this.apiCreds;
   }
 
-  getCacheStats(): { size: number; items: string[] } {
-    return {
-      size: this.marketCache.size,
-      items: Array.from(this.marketCache.keys()),
-    };
-  }
-
-  clearCache(): void {
-    this.marketCache.clear();
-    console.log('🗑️  Market cache cleared');
-  }
-  
   calculateCopySize(originalSize: number): number {
     const { positionSizeMode, positionSizeMultiplier, fixedPositionSize, maxTradeSize, minTradeSize, orderType } = config.trading;
     let size = positionSizeMode === 'fixed'
@@ -190,11 +174,6 @@ export class TradeExecutor {
     return Math.round(size * 100) / 100;
   }
   
-  calculateCopyShares(originalSizeUsdc: number, price: number): number {
-    const notional = this.calculateCopySize(originalSizeUsdc);
-    return this.calculateSharesFromNotional(notional, price);
-  }
-
   calculateSharesFromNotional(notional: number, price: number): number {
     const shares = notional / price;
     return Math.round(shares * 10000) / 10000;
@@ -298,9 +277,9 @@ export class TradeExecutor {
     console.log(`📈 Executing copy trade (${orderType}):`);
     console.log(`   Market: ${originalTrade.market}`);
     console.log(`   Side: ${originalTrade.side}`);
-    console.log(`   Original size: ${originalTrade.size} USDC`);
+    console.log(`   Original size: ${originalTrade.size} pUSD`);
     console.log(`   Token ID: ${originalTrade.tokenId}`);
-    console.log(`   Copy notional: ${copyNotional} USDC`);
+    console.log(`   Copy notional: ${copyNotional} pUSD`);
 
     return this.executeWithRetry(async () => {
       if (orderType === 'FOK' || orderType === 'FAK') {
@@ -514,14 +493,14 @@ export class TradeExecutor {
     const metadata = await this.getMarketMetadata(tokenId);
     const exchangeAddress = metadata.negRisk ? config.contracts.negRiskExchange : config.contracts.exchange;
 
-    const usdc = new ethers.Contract(config.contracts.usdc, this.ERC20_ABI, this.wallet);
+    const pusd = new ethers.Contract(config.contracts.pusd, this.ERC20_ABI, this.wallet);
     const ctf = new ethers.Contract(config.contracts.ctf, this.CTF_ABI, this.wallet);
 
     // decimals never change — cache permanently
-    if (this.usdcDecimals === undefined) {
-      this.usdcDecimals = Number(await usdc.decimals!());
+    if (this.collateralDecimals === undefined) {
+      this.collateralDecimals = Number(await pusd.decimals!());
     }
-    const decimals = this.usdcDecimals;
+    const decimals = this.collateralDecimals;
     const required = ethers.parseUnits(requiredAmount.toString(), decimals);
 
     // use cached balance data if still fresh
@@ -534,9 +513,9 @@ export class TradeExecutor {
     } else {
       // all 5 RPC/API calls in parallel
       const [balance, allowanceCtf, allowanceEx, clobBal, ctfApproved] = await Promise.all([
-        usdc.balanceOf!(this.wallet.address),
-        usdc.allowance!(this.wallet.address, config.contracts.ctf),
-        usdc.allowance!(this.wallet.address, exchangeAddress),
+        pusd.balanceOf!(this.wallet.address),
+        pusd.allowance!(this.wallet.address, config.contracts.ctf),
+        pusd.allowance!(this.wallet.address, exchangeAddress),
         this.clobClient.getBalanceAllowance({ asset_type: AssetType.COLLATERAL }),
         ctf.isApprovedForAll!(this.wallet.address, exchangeAddress),
       ]);
@@ -554,15 +533,15 @@ export class TradeExecutor {
 
     if (balData.balance < required) {
       const bal = ethers.formatUnits(balData.balance, decimals);
-      throw new Error(`not enough balance / allowance (USDC.e balance ${bal} < required ${requiredAmount})`);
+      throw new Error(`not enough balance / allowance (pUSD balance ${bal} < required ${requiredAmount})`);
     }
     if (balData.allowanceCtf < required) {
       const allow = ethers.formatUnits(balData.allowanceCtf, decimals);
-      throw new Error(`not enough balance / allowance (USDC.e allowance to CTF ${allow} < required ${requiredAmount})`);
+      throw new Error(`not enough balance / allowance (pUSD allowance to CTF ${allow} < required ${requiredAmount})`);
     }
     if (balData.allowanceEx < required) {
       const allow = ethers.formatUnits(balData.allowanceEx, decimals);
-      throw new Error(`not enough balance / allowance (USDC.e allowance to Exchange ${allow} < required ${requiredAmount})`);
+      throw new Error(`not enough balance / allowance (pUSD allowance to Exchange ${allow} < required ${requiredAmount})`);
     }
     if (balData.clobBalance < requiredAmount) {
       throw new Error(`not enough balance / allowance (CLOB balance ${balData.clobBalance} < required ${requiredAmount})`);
@@ -576,8 +555,7 @@ export class TradeExecutor {
 
     console.log(`   Balance/allowance check passed`);
   }
-  
-  
+
   async getPositions(): Promise<any[]> {
     try {
       const trades = await this.clobClient.getTrades({ maker_address: this.wallet.address });
@@ -603,15 +581,6 @@ export class TradeExecutor {
     }
   }
   
-  async cancelAllOrders(): Promise<void> {
-    try {
-      await this.clobClient.cancelAll();
-      console.log('✅ All orders cancelled');
-    } catch (error) {
-      console.error('Error cancelling orders:', error);
-    }
-  }
-
   private async getOrderOptions(tokenId: string): Promise<{ tickSize: any; negRisk: boolean }> {
     const metadata = await this.getMarketMetadata(tokenId);
     return {
@@ -625,7 +594,7 @@ export class TradeExecutor {
 
     console.log('🔐 Checking required token approvals (EOA mode)...');
 
-    const usdc = new ethers.Contract(config.contracts.usdc, this.ERC20_ABI, this.wallet);
+    const pusd = new ethers.Contract(config.contracts.pusd, this.ERC20_ABI, this.wallet);
     const ctf = new ethers.Contract(config.contracts.ctf, this.CTF_ABI, this.wallet);
 
     const maticBal = await this.provider.getBalance(this.wallet.address);
@@ -634,7 +603,7 @@ export class TradeExecutor {
       console.log(`   ⚠️  Low POL/MATIC for gas: ${maticAmount.toFixed(4)}`);
     }
 
-    const decimals = Number(await usdc.decimals!());
+    const decimals = Number(await pusd.decimals!());
     const minAllowance = ethers.parseUnits(config.trading.maxTradeSize.toString(), decimals);
     const gasOverrides = await this.getGasOverrides();
 
@@ -647,15 +616,15 @@ export class TradeExecutor {
     ];
 
     for (const spender of usdcSpenders) {
-      const allowance: bigint = await usdc.allowance!(this.wallet.address, spender.address);
+      const allowance: bigint = await pusd.allowance!(this.wallet.address, spender.address);
       if (allowance < minAllowance) {
-        console.log(`   Approving USDC.e to ${spender.name} (${spender.address})...`);
-        const tx = await usdc.approve!(spender.address, ethers.MaxUint256, gasOverrides);
+        console.log(`   Approving pUSD to ${spender.name} (${spender.address})...`);
+        const tx = await pusd.approve!(spender.address, ethers.MaxUint256, gasOverrides);
         console.log(`   Tx: ${tx.hash}`);
         await tx.wait();
-        console.log(`   ✅ USDC.e approved to ${spender.name}`);
+        console.log(`   ✅ pUSD approved to ${spender.name}`);
       } else {
-        console.log(`   ✅ USDC.e already approved to ${spender.name}`);
+        console.log(`   ✅ pUSD already approved to ${spender.name}`);
       }
     }
 
@@ -682,8 +651,8 @@ export class TradeExecutor {
 
   private async getGasOverrides(): Promise<ethers.TransactionRequest> {
     const feeData = await this.provider.getFeeData();
-    const minPriority = ethers.parseUnits(this.MIN_PRIORITY_FEE_GWEI.toString(), 'gwei');
-    const minMaxFee = ethers.parseUnits(this.MIN_MAX_FEE_GWEI.toString(), 'gwei');
+    const minPriority = ethers.parseUnits(config.gas.minPriorityFeeGwei.toString(), 'gwei');
+    const minMaxFee = ethers.parseUnits(config.gas.minMaxFeeGwei.toString(), 'gwei');
 
     let maxPriority = feeData.maxPriorityFeePerGas ?? feeData.gasPrice ?? minPriority;
     let maxFee = feeData.maxFeePerGas ?? feeData.gasPrice ?? minMaxFee;
