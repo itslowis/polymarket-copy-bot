@@ -611,6 +611,7 @@ export class TradeExecutor {
       { name: 'CTF', address: config.contracts.ctf },
       { name: 'Exchange (v2)', address: config.contracts.exchange },
       { name: 'Exchange (v1)', address: config.contracts.exchangeV1 },
+      { name: 'Exchange (v3)', address: config.contracts.exchangeV3 },
       { name: 'Neg Risk Exchange (v2)', address: config.contracts.negRiskExchange },
       { name: 'Neg Risk Exchange (v1)', address: config.contracts.negRiskExchangeV1 },
     ];
@@ -631,6 +632,7 @@ export class TradeExecutor {
     const operators = [
       { name: 'Exchange (v2)', address: config.contracts.exchange },
       { name: 'Exchange (v1)', address: config.contracts.exchangeV1 },
+      { name: 'Exchange (v3)', address: config.contracts.exchangeV3 },
       { name: 'Neg Risk Exchange (v2)', address: config.contracts.negRiskExchange },
       { name: 'Neg Risk Exchange (v1)', address: config.contracts.negRiskExchangeV1 },
     ];

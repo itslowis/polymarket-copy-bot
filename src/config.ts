@@ -19,6 +19,12 @@ export const config = {
     exchange: '0xE111180000d2663C0091e4f400237545B87B996B',
     negRiskExchange: '0xe2222d279d744050d28e00520010520000310F59',
 
+    // v3 exchange, listed in the docs as the Combos "Exchange (proxy)".
+    // clob-client-v2 1.1.0 added `case 3` to its order routing and sends every
+    // v3 order here, with no separate neg-risk variant. Approved for the same
+    // reason as v1 below: the server chooses the version, not us.
+    exchangeV3: '0xe3333700cA9d93003F00f0F71f8515005F6c00Aa',
+
     // Legacy v1 exchanges. These are NOT listed in Polymarket's public contract
     // docs, but do not delete them: clob-client-v2 picks its exchange from the
     // order version the CLOB server reports at `GET /version`, and signs against
